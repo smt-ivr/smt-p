@@ -355,7 +355,7 @@ footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
     var ic = doc.querySelector('link[rel~="apple-touch-icon"]') || doc.querySelector('link[rel~="icon"]');
     var icon = ic ? (ic.getAttribute("href") || "").trim() : "";
     if (!icon) icon = m('meta[property="og:image"]');
-    if (/^data:/i.test(icon)) { if (!/^data:image\//i.test(icon)) icon = ""; }
+    if (/^data:/i.test(icon)) { if (icon.slice(0, 11).toLowerCase() !== "data:image/") icon = ""; }
     else if (icon) { try { icon = new URL(icon, base).toString(); } catch(e){ icon = ""; } }
     out.icon = icon.length <= 20000 ? icon : "";
     return out;
