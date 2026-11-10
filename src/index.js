@@ -93,6 +93,7 @@ async function fetchMeta(url) {
       headers: { "user-agent": "Mozilla/5.0 (compatible; smt-p link preview)", accept: "text/html,*/*" },
       cf: { cacheTtl: 0 },
     });
+    if (!res.ok) return meta;
     const finalUrl = res.url || url;
     const type = res.headers.get("content-type") || "";
     if (!type.includes("html")) return meta;
@@ -131,11 +132,21 @@ async function fetchMeta(url) {
     if (icon && !icon.startsWith("data:")) {
       try { icon = new URL(icon, finalUrl).toString(); } catch { icon = ""; }
     }
-    meta.icon = icon.slice(0, 2000);
+    meta.icon = icon.length <= 20000 ? icon : "";
   } catch {
     // Keep the fallback values.
   }
   return meta;
+}
+
+function cleanLink(body) {
+  const url = normalizeUrl(body?.url);
+  if (!url) return null;
+  const title = String(body.title || "").trim().slice(0, 120) || fallbackTitle(url);
+  const description = String(body.description || "").trim().slice(0, 300);
+  let icon = String(body.icon || "").trim();
+  if (icon.length > 20000 || (icon && !/^(https?:|data:image\/)/i.test(icon))) icon = "";
+  return { url, title, description, icon };
 }
 
 async function handleApi(request, env, path) {
@@ -164,12 +175,9 @@ async function handleApi(request, env, path) {
   if (path === "/api/links" && method === "POST") {
     let body;
     try { body = await request.json(); } catch { return json({ error: "בקשה לא תקינה" }, 400); }
-    const url = normalizeUrl(body.url);
-    if (!url) return json({ error: "כתובת לא תקינה" }, 400);
-    const title = String(body.title || "").trim().slice(0, 120) || fallbackTitle(url);
-    const description = String(body.description || "").trim().slice(0, 300);
-    let icon = String(body.icon || "").trim().slice(0, 2000);
-    if (icon && !/^(https?:|data:image\/)/i.test(icon)) icon = "";
+    const clean = cleanLink(body);
+    if (!clean) return json({ error: "כתובת לא תקינה" }, 400);
+    const { url, title, description, icon } = clean;
     const max = await env.DB.prepare("SELECT COALESCE(MAX(sort), 0) AS m FROM p_links").first();
     const row = await env.DB.prepare(
       "INSERT INTO p_links (url, title, description, icon, sort) VALUES (?, ?, ?, ?, ?) RETURNING id, url, title, description, icon"
@@ -178,6 +186,16 @@ async function handleApi(request, env, path) {
   }
 
   const del = path.match(/^\/api\/links\/(\d+)$/);
+  if (del && method === "PUT") {
+    let body;
+    try { body = await request.json(); } catch { return json({ error: "בקשה לא תקינה" }, 400); }
+    const clean = cleanLink(body);
+    if (!clean) return json({ error: "כתובת לא תקינה" }, 400);
+    const row = await env.DB.prepare(
+      "UPDATE p_links SET url = ?, title = ?, description = ?, icon = ? WHERE id = ? RETURNING id, url, title, description, icon"
+    ).bind(clean.url, clean.title, clean.description, clean.icon, +del[1]).first();
+    return row ? json(row) : json({ error: "לא נמצא" }, 404);
+  }
   if (del && method === "DELETE") {
     await env.DB.prepare("DELETE FROM p_links WHERE id = ?").bind(+del[1]).run();
     return json({ ok: true });
