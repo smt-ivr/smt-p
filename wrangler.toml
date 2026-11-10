@@ -1,0 +1,20 @@
+name = "smt-p"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# Served at https://smti.uk/p
+routes = [
+  { pattern = "smti.uk/p", zone_name = "smti.uk" },
+  { pattern = "smti.uk/p/*", zone_name = "smti.uk" }
+]
+
+# Existing drive-pro database. This project only uses its own table (p_links)
+# and never reads or changes the existing tables.
+[[d1_databases]]
+binding = "DB"
+database_name = "drive-pro"
+database_id = "2dee5e98-bf06-4aa3-991d-129ef43b1cc1"
+
+[vars]
+ADMIN_PASSWORD = "1631"
