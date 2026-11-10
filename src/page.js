@@ -69,13 +69,17 @@ h1 span{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-b
 .host{direction:ltr;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .arrow{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--bg2);color:var(--accent);flex:none;transition:background .18s,color .18s}
 .card:hover .arrow{background:var(--accent);color:#fff}
-.del{position:absolute;top:10px;left:10px;width:32px;height:32px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--danger);cursor:pointer;display:none;place-items:center}
-body.admin .del{display:grid}
-.del:hover{background:var(--danger);color:#fff;border-color:var(--danger)}
+.acts{position:absolute;top:10px;left:10px;display:none;gap:6px}
+body.admin .acts{display:flex}
+body.admin .card-top{padding-left:76px}
+.act{width:32px;height:32px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--accent);cursor:pointer;display:grid;place-items:center}
+.act:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+.act.del{color:var(--danger)}
+.act.del:hover{background:var(--danger);border-color:var(--danger);color:#fff}
 .empty{text-align:center;color:var(--muted);padding:60px 16px;border:2px dashed var(--line);border-radius:18px}
 .add-card{display:none;align-items:center;justify-content:center;flex-direction:column;gap:8px;border:2px dashed color-mix(in srgb,var(--accent) 45%,var(--line));background:transparent;box-shadow:none;color:var(--accent);font-weight:700;cursor:pointer;font:inherit;font-weight:700}
 body.admin .add-card{display:flex}
-.admin-bar{display:none;justify-content:center;gap:8px;align-items:center;margin:-10px 0 18px;color:var(--muted);font-size:14px}
+.admin-bar{display:none;flex-wrap:wrap;justify-content:center;gap:12px;align-items:center;margin:-10px 0 18px;color:var(--muted);font-size:14px}
 body.admin .admin-bar{display:flex}
 .pill{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);padding:4px 10px;border-radius:99px;font-weight:600}
 .linkish{background:none;border:0;color:var(--muted);text-decoration:underline;cursor:pointer;font:inherit}
@@ -121,7 +125,7 @@ footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
     </button>
   </div>
 
-  <div class="admin-bar"><span class="pill">מצב ניהול</span><button class="linkish" id="logout">יציאה</button></div>
+  <div class="admin-bar"><span class="pill">מצב ניהול</span><button class="linkish" id="refreshAll">רענון פרטים לכל האתרים</button><button class="linkish" id="logout">יציאה</button></div>
 
   <div class="grid" id="grid"></div>
   <footer>smti.uk</footer>
@@ -142,7 +146,7 @@ footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
 
 <dialog id="addDlg">
   <form class="dlg" id="addForm" method="dialog">
-    <h2>הוספת פרויקט</h2>
+    <h2 id="addTitle">הוספת פרויקט</h2>
     <p class="hint">כתוב שם נתיב (למשל <b>zmanim</b>) לאתר ב-smti.uk, או הדבק כל קישור אחר. הפרטים ימולאו אוטומטית.</p>
     <label for="fUrl">קישור</label>
     <div class="row">
@@ -158,7 +162,7 @@ footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
     <div class="preview" id="preview"></div>
     <div class="err" id="addErr"></div>
     <div class="actions">
-      <button class="btn btn-primary" type="submit"><span class="spin"></span>הוספה</button>
+      <button class="btn btn-primary" type="submit"><span class="spin"></span><span id="addSubmit">הוספה</span></button>
       <button class="btn btn-ghost" type="button" data-close>ביטול</button>
     </div>
   </form>
@@ -223,6 +227,8 @@ footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
   var arrowSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>';
   var trashSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>';
 
+  var editSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
+
   function render(){
     var q = $("q").value.trim().toLowerCase();
     grid.innerHTML = "";
@@ -240,14 +246,18 @@ footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
       go.appendChild(el("span", "host", prettyHost(l.url)));
       var ar = el("span", "arrow"); ar.innerHTML = arrowSvg; go.appendChild(ar);
       a.appendChild(go);
-      var d = el("button", "del"); d.type = "button"; d.title = "הסרה"; d.setAttribute("aria-label", "הסרה"); d.innerHTML = trashSvg;
+      var acts = el("div", "acts");
+      var ed = el("button", "act"); ed.type = "button"; ed.title = "עריכה"; ed.setAttribute("aria-label", "עריכה"); ed.innerHTML = editSvg;
+      ed.onclick = function(ev){ ev.preventDefault(); ev.stopPropagation(); openAdd(l); };
+      var d = el("button", "act del"); d.type = "button"; d.title = "הסרה"; d.setAttribute("aria-label", "הסרה"); d.innerHTML = trashSvg;
       d.onclick = function(ev){ ev.preventDefault(); ev.stopPropagation(); removeLink(l); };
-      a.appendChild(d);
+      acts.appendChild(ed); acts.appendChild(d);
+      a.appendChild(acts);
       grid.appendChild(a);
     });
     var add = el("button", "card add-card"); add.type = "button";
     add.innerHTML = '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>הוספת פרויקט</span>';
-    add.onclick = openAdd;
+    add.onclick = function(){ openAdd(); };
     grid.appendChild(add);
     if (!shown.length && !document.body.classList.contains("admin")) {
       var empty = el("div", "empty", q ? "לא נמצאו פרויקטים" : "עדיין אין פרויקטים. לחץ על המנעול כדי להוסיף.");
@@ -290,9 +300,17 @@ footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
   $("logout").onclick = function(){ setAdmin(false); toast("יצאת ממצב ניהול"); };
 
   // Add
-  function openAdd(){
-    ["fUrl","fTitle","fDesc","fIcon"].forEach(function(id){ $(id).value = ""; });
-    $("addErr").textContent = ""; lastFetched = ""; updatePreview();
+  var editingId = null;
+  function openAdd(link){
+    editingId = link ? link.id : null;
+    $("addTitle").textContent = link ? "עריכת פרויקט" : "הוספת פרויקט";
+    $("addSubmit").textContent = link ? "שמירה" : "הוספה";
+    $("fUrl").value = link ? link.url : "";
+    $("fTitle").value = link ? link.title : "";
+    $("fDesc").value = link ? (link.description || "") : "";
+    $("fIcon").value = link ? (link.icon || "") : "";
+    ["fTitle","fDesc","fIcon"].forEach(function(id){ $(id).dataset.touched = link && $(id).value ? "1" : ""; });
+    $("addErr").textContent = ""; lastFetched = link ? link.url : ""; updatePreview();
     $("addDlg").showModal(); $("fUrl").focus();
   }
 
@@ -319,13 +337,47 @@ footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
     t.appendChild(h); p.appendChild(t);
   }
 
+  // Pages on smti.uk are read directly by the browser (same site). A Worker
+  // cannot fetch other Workers on its own domain, so the server is used only
+  // for other domains.
+  function fallbackMeta(url){
+    var t = url;
+    try { var u = new URL(url); t = decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() || u.hostname); } catch(e){}
+    return { url: url, title: t, description: "", icon: "" };
+  }
+  function parseHtmlMeta(html, base, url){
+    var doc = new DOMParser().parseFromString(html, "text/html");
+    var m = function(sel){ var e = doc.querySelector(sel); return e ? (e.getAttribute("content") || "").trim() : ""; };
+    var out = fallbackMeta(url);
+    var title = m('meta[property="og:title"]') || m('meta[name="twitter:title"]') || (doc.title || "").trim();
+    if (title) out.title = title.slice(0, 120);
+    out.description = (m('meta[name="description"]') || m('meta[property="og:description"]')).slice(0, 300);
+    var ic = doc.querySelector('link[rel~="apple-touch-icon"]') || doc.querySelector('link[rel~="icon"]');
+    var icon = ic ? (ic.getAttribute("href") || "").trim() : "";
+    if (!icon) icon = m('meta[property="og:image"]');
+    if (/^data:/i.test(icon)) { if (!/^data:image\//i.test(icon)) icon = ""; }
+    else if (icon) { try { icon = new URL(icon, base).toString(); } catch(e){ icon = ""; } }
+    out.icon = icon.length <= 20000 ? icon : "";
+    return out;
+  }
+  function getMeta(url){
+    var same = false;
+    try { same = new URL(url).origin === location.origin; } catch(e){}
+    if (!same) return api("meta?url=" + encodeURIComponent(url));
+    return fetch(url, { credentials: "same-origin" }).then(function(r){
+      if (!r.ok) return fallbackMeta(url);
+      var base = r.url || url;
+      return r.text().then(function(h){ return parseHtmlMeta(h, base, url); });
+    }).catch(function(){ return fallbackMeta(url); });
+  }
+
   var lastFetched = "";
   function autofill(force){
     var url = normalize($("fUrl").value);
     if (!url || (!force && url === lastFetched)) return;
     lastFetched = url;
     var btn = $("fetchBtn"); busy(btn, true);
-    api("meta?url=" + encodeURIComponent(url)).then(function(m){
+    getMeta(url).then(function(m){
       busy(btn, false);
       if (normalize($("fUrl").value) !== url) return;
       $("fUrl").value = m.url;
@@ -353,10 +405,15 @@ footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
     var body = { url: normalize($("fUrl").value), title: $("fTitle").value, description: $("fDesc").value, icon: $("fIcon").value };
     if (!body.url) { $("addErr").textContent = "יש להזין קישור"; return; }
     busy(btn, true);
-    api("links", { method:"POST", body: JSON.stringify(body) }).then(function(row){
-      busy(btn, false); links.push(row); render();
-      ["fTitle","fDesc","fIcon"].forEach(function(id){ $(id).dataset.touched = ""; });
-      $("addDlg").close(); toast("הפרויקט נוסף");
+    var id = editingId;
+    var req = id ? api("links/" + id, { method:"PUT", body: JSON.stringify(body) })
+                 : api("links", { method:"POST", body: JSON.stringify(body) });
+    req.then(function(row){
+      busy(btn, false);
+      if (id) links = links.map(function(x){ return x.id === id ? row : x; });
+      else links.push(row);
+      render();
+      $("addDlg").close(); toast(id ? "נשמר" : "הפרויקט נוסף");
     }).catch(function(e){
       busy(btn, false); $("addErr").textContent = e.message;
       if (e.status === 401) { $("addDlg").close(); setAdmin(false); }
@@ -369,6 +426,25 @@ footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
       links = links.filter(function(x){ return x.id !== l.id; }); render(); toast("הוסר");
     }).catch(function(e){ toast(e.message); if (e.status === 401) setAdmin(false); });
   }
+
+  $("refreshAll").onclick = function(){
+    if (!links.length) return;
+    if (!confirm("לטעון מחדש שם, תיאור ואייקון לכל האתרים? שינויים ידניים יוחלפו.")) return;
+    var btn = this, done = 0, list = links.slice();
+    btn.disabled = true;
+    (function next(i){
+      if (i >= list.length) { btn.disabled = false; render(); toast("עודכנו " + done + " אתרים"); return; }
+      var l = list[i];
+      toast("מעדכן " + (i + 1) + "/" + list.length + "...");
+      getMeta(l.url).then(function(m){
+        var body = { url: l.url, title: m.title || l.title, description: m.description || l.description, icon: m.icon || l.icon };
+        return api("links/" + l.id, { method:"PUT", body: JSON.stringify(body) });
+      }).then(function(row){
+        links = links.map(function(x){ return x.id === row.id ? row : x; }); done++;
+      }).catch(function(e){ if (e && e.status === 401) { setAdmin(false); i = list.length; } })
+        .then(function(){ next(i + 1); });
+    })(0);
+  };
 
   document.querySelectorAll("[data-close]").forEach(function(b){
     b.onclick = function(){ b.closest("dialog").close(); };
