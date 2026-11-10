@@ -85,6 +85,27 @@ function fallbackTitle(url) {
   return decodeURIComponent(seg || u.hostname.replace(/^www\./, ""));
 }
 
+// The shared SMT logo (…/smt.png) is used by many sites as a default; prefer
+// a site's own icon over it, and keep it only when nothing else exists.
+function isGenericIcon(u) {
+  return /\/smt\.png(\?|#|$)/i.test(u);
+}
+
+function pickIcon(hrefs, base) {
+  const list = [];
+  for (let h of hrefs) {
+    h = String(h || "").trim();
+    if (!h) continue;
+    if (/^data:/i.test(h)) {
+      if (!/^data:image\//i.test(h)) continue;
+    } else {
+      try { h = new URL(h, base).toString(); } catch { continue; }
+    }
+    if (h.length <= 20000) list.push(h);
+  }
+  return list.find((h) => !isGenericIcon(h)) || list[0] || "";
+}
+
 async function fetchMeta(url) {
   const meta = { url, title: fallbackTitle(url), description: "", icon: "" };
   try {
@@ -122,17 +143,11 @@ async function fetchMeta(url) {
     const desc = metas["description"] || metas["og:description"] || metas["twitter:description"];
     if (desc) meta.description = desc.slice(0, 300);
 
-    let icon = "";
-    const links = html.match(/<link\b[^>]*>/gi) || [];
-    const pick = (re) => links.find((l) => re.test(attr(l, "rel") || ""));
-    const iconTag = pick(/apple-touch-icon/i) || pick(/(^|\s)icon(\s|$)/i) || pick(/shortcut icon/i);
-    if (iconTag) icon = attr(iconTag, "href") || "";
-    if (!icon) icon = metas["og:image"] || "";
-    if (icon.startsWith("data:") && !/^data:image\//i.test(icon)) icon = "";
-    if (icon && !icon.startsWith("data:")) {
-      try { icon = new URL(icon, finalUrl).toString(); } catch { icon = ""; }
-    }
-    meta.icon = icon.length <= 20000 ? icon : "";
+    const links = (html.match(/<link\b[^>]*>/gi) || []).filter((l) => /icon/i.test(attr(l, "rel") || ""));
+    const apple = links.filter((l) => /apple-touch-icon/i.test(attr(l, "rel")));
+    const hrefs = [...apple, ...links.filter((l) => !apple.includes(l))].map((l) => attr(l, "href") || "");
+    if (metas["og:image"]) hrefs.push(metas["og:image"]);
+    meta.icon = pickIcon(hrefs, finalUrl);
   } catch {
     // Keep the fallback values.
   }
@@ -183,6 +198,16 @@ async function handleApi(request, env, path) {
       "INSERT INTO p_links (url, title, description, icon, sort) VALUES (?, ?, ?, ?, ?) RETURNING id, url, title, description, icon"
     ).bind(url, title, description, icon, (max?.m || 0) + 1).first();
     return json(row, 201);
+  }
+
+  if (path === "/api/order" && method === "PUT") {
+    let body;
+    try { body = await request.json(); } catch { return json({ error: "בקשה לא תקינה" }, 400); }
+    const ids = Array.isArray(body?.ids) ? body.ids.map(Number).filter(Number.isInteger) : [];
+    if (!ids.length) return json({ error: "בקשה לא תקינה" }, 400);
+    const stmt = env.DB.prepare("UPDATE p_links SET sort = ? WHERE id = ?");
+    await env.DB.batch(ids.map((id, i) => stmt.bind(i + 1, id)));
+    return json({ ok: true });
   }
 
   const del = path.match(/^\/api\/links\/(\d+)$/);

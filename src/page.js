@@ -69,9 +69,14 @@ h1 span{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-b
 .host{direction:ltr;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .arrow{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--bg2);color:var(--accent);flex:none;transition:background .18s,color .18s}
 .card:hover .arrow{background:var(--accent);color:#fff}
-.acts{position:absolute;top:10px;left:10px;display:none;gap:6px}
+.acts{display:none;gap:6px;justify-content:space-between;padding-top:10px;border-top:1px solid var(--line)}
+.acts > span{display:flex;gap:6px}
+.card,.host,.title{min-width:0}
 body.admin .acts{display:flex}
-body.admin .card-top{padding-left:76px}
+body.admin .card{cursor:grab}
+.card.dragging{opacity:.4}
+.card.drop-target{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 30%,transparent)}
+.act:disabled{opacity:.3;cursor:default;pointer-events:none}
 .act{width:32px;height:32px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--accent);cursor:pointer;display:grid;place-items:center}
 .act:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
 .act.del{color:var(--danger)}
@@ -103,7 +108,7 @@ label{display:block;font-size:14px;font-weight:600;margin:14px 0 6px}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--text);color:var(--bg);padding:12px 18px;border-radius:12px;opacity:0;transition:.25s;pointer-events:none;font-weight:600;z-index:10}
 .toast.show{opacity:1;transform:translateX(-50%)}
 footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
-@media (max-width:520px){header{padding-top:32px}.logo{width:80px;height:80px}.grid{grid-template-columns:1fr 1fr;gap:12px}.card{padding:14px;min-height:130px}.ico{width:40px;height:40px}.title{font-size:15px}.desc{display:none}}
+@media (max-width:520px){.act{width:28px;height:28px;border-radius:8px}.acts > span{gap:4px}.acts{gap:4px}.arrow{width:28px;height:28px}header{padding-top:32px}.logo{width:80px;height:80px}.grid{grid-template-columns:1fr 1fr;gap:12px}.card{padding:14px;min-height:130px}.ico{width:40px;height:40px}.title{font-size:15px}.desc{display:none}}
 @media (max-width:340px){.grid{grid-template-columns:1fr}}
 </style>
 </head>
@@ -206,7 +211,7 @@ footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
   }
 
   function prettyHost(url){
-    try { var u = new URL(url); return (u.host + u.pathname).replace(/\\/$/, ""); } catch(e){ return url; }
+    try { var u = new URL(url), s = (u.host + u.pathname).replace(/\\/$/, ""); try { s = decodeURIComponent(s); } catch(e){} return s; } catch(e){ return url; }
   }
 
   function iconEl(link){
@@ -229,6 +234,40 @@ footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
 
   var editSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
 
+  // In RTL "forward" (earlier) points right.
+  var prevSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
+  var nextSvg = arrowSvg;
+
+  function actBtn(cls, label, svg, fn, disabled){
+    var b = el("button", cls); b.type = "button"; b.title = label; b.setAttribute("aria-label", label); b.innerHTML = svg;
+    b.disabled = !!disabled;
+    b.onclick = function(ev){ ev.preventDefault(); ev.stopPropagation(); fn(); };
+    return b;
+  }
+
+  var dragId = null;
+  function clearDrop(){ document.querySelectorAll(".drop-target").forEach(function(x){ x.classList.remove("drop-target"); }); }
+
+  function saveOrder(){
+    api("order", { method:"PUT", body: JSON.stringify({ ids: links.map(function(x){ return x.id; }) }) })
+      .then(function(){ toast("הסדר נשמר"); })
+      .catch(function(e){ toast(e.message); if (e.status === 401) setAdmin(false); load(); });
+  }
+  function move(l, dir){
+    var i = links.indexOf(l), j = i + dir;
+    if (i < 0 || j < 0 || j >= links.length) return;
+    links.splice(i, 1); links.splice(j, 0, l);
+    render(); saveOrder();
+  }
+  function dropOn(fromId, toId){
+    var from = links.findIndex(function(x){ return x.id === fromId; });
+    var to = links.findIndex(function(x){ return x.id === toId; });
+    if (from < 0 || to < 0) return;
+    var item = links.splice(from, 1)[0];
+    links.splice(to, 0, item);
+    render(); saveOrder();
+  }
+
   function render(){
     var q = $("q").value.trim().toLowerCase();
     grid.innerHTML = "";
@@ -247,12 +286,21 @@ footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
       var ar = el("span", "arrow"); ar.innerHTML = arrowSvg; go.appendChild(ar);
       a.appendChild(go);
       var acts = el("div", "acts");
-      var ed = el("button", "act"); ed.type = "button"; ed.title = "עריכה"; ed.setAttribute("aria-label", "עריכה"); ed.innerHTML = editSvg;
-      ed.onclick = function(ev){ ev.preventDefault(); ev.stopPropagation(); openAdd(l); };
-      var d = el("button", "act del"); d.type = "button"; d.title = "הסרה"; d.setAttribute("aria-label", "הסרה"); d.innerHTML = trashSvg;
-      d.onclick = function(ev){ ev.preventDefault(); ev.stopPropagation(); removeLink(l); };
-      acts.appendChild(ed); acts.appendChild(d);
+      var idx = links.indexOf(l);
+      var moveBox = el("span"), editBox = el("span");
+      moveBox.appendChild(actBtn("act", "הזזה קדימה", prevSvg, function(){ move(l, -1); }, idx === 0));
+      moveBox.appendChild(actBtn("act", "הזזה אחורה", nextSvg, function(){ move(l, 1); }, idx === links.length - 1));
+      editBox.appendChild(actBtn("act", "עריכה", editSvg, function(){ openAdd(l); }));
+      editBox.appendChild(actBtn("act del", "הסרה", trashSvg, function(){ removeLink(l); }));
+      acts.appendChild(moveBox); acts.appendChild(editBox);
       a.appendChild(acts);
+      if (document.body.classList.contains("admin")) {
+        a.draggable = true;
+        a.addEventListener("dragstart", function(ev){ dragId = l.id; a.classList.add("dragging"); ev.dataTransfer.effectAllowed = "move"; try { ev.dataTransfer.setData("text/plain", String(l.id)); } catch(e){} });
+        a.addEventListener("dragend", function(){ dragId = null; a.classList.remove("dragging"); clearDrop(); });
+        a.addEventListener("dragover", function(ev){ if (dragId == null || dragId === l.id) return; ev.preventDefault(); clearDrop(); a.classList.add("drop-target"); });
+        a.addEventListener("drop", function(ev){ ev.preventDefault(); clearDrop(); if (dragId != null && dragId !== l.id) dropOn(dragId, l.id); });
+      }
       grid.appendChild(a);
     });
     var add = el("button", "card add-card"); add.type = "button";
@@ -352,12 +400,20 @@ footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px}
     var title = m('meta[property="og:title"]') || m('meta[name="twitter:title"]') || (doc.title || "").trim();
     if (title) out.title = title.slice(0, 120);
     out.description = (m('meta[name="description"]') || m('meta[property="og:description"]')).slice(0, 300);
-    var ic = doc.querySelector('link[rel~="apple-touch-icon"]') || doc.querySelector('link[rel~="icon"]');
-    var icon = ic ? (ic.getAttribute("href") || "").trim() : "";
-    if (!icon) icon = m('meta[property="og:image"]');
-    if (/^data:/i.test(icon)) { if (icon.slice(0, 11).toLowerCase() !== "data:image/") icon = ""; }
-    else if (icon) { try { icon = new URL(icon, base).toString(); } catch(e){ icon = ""; } }
-    out.icon = icon.length <= 20000 ? icon : "";
+    // Own icon first; the shared SMT logo (.../smt.png) only if nothing else exists.
+    var tags = Array.prototype.slice.call(doc.querySelectorAll("link[rel]")).filter(function(t){ return /icon/i.test(t.getAttribute("rel")); });
+    var apple = tags.filter(function(t){ return /apple-touch-icon/i.test(t.getAttribute("rel")); });
+    var hrefs = apple.concat(tags.filter(function(t){ return apple.indexOf(t) < 0; })).map(function(t){ return t.getAttribute("href") || ""; });
+    hrefs.push(m('meta[property="og:image"]'));
+    var list = [];
+    hrefs.forEach(function(h){
+      h = (h || "").trim(); if (!h) return;
+      if (h.slice(0, 5).toLowerCase() === "data:") { if (h.slice(0, 11).toLowerCase() !== "data:image/") return; }
+      else { try { h = new URL(h, base).toString(); } catch(e){ return; } }
+      if (h.length <= 20000) list.push(h);
+    });
+    var own = list.filter(function(h){ return h.split(/[?#]/)[0].toLowerCase().slice(-8) !== "/smt.png"; });
+    out.icon = own[0] || list[0] || "";
     return out;
   }
   function getMeta(url){
