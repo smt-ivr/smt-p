@@ -1,0 +1,7 @@
+.gradle/
+build/
+local.properties
+*.jks
+*.keystore
+app/src/main/assets/config.json
+app/src/main/res/mipmap-*/ic_launcher_custom.png

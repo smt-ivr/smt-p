@@ -1,0 +1,157 @@
+name: Build APK
+
+# Started by the apk-builder worker (smti.uk/apk) through the GitHub API.
+# It fetches the job's settings from the worker, builds the Android app and uploads the APK back.
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "Job id from the apk-builder worker"
+        required: true
+
+run-name: "APK ${{ inputs.job_id }}"
+
+concurrency:
+  group: apk-${{ inputs.job_id }}
+
+permissions:
+  contents: read
+
+env:
+  # Fixed here on purpose (not an input), so the build secret is only ever sent to this address.
+  BUILDER_URL: ${{ vars.APK_BUILDER_URL || 'https://smti.uk/apk' }}
+  JOB_ID: ${{ inputs.job_id }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apk-builder/android
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: apk-builder/android
+
+      - name: Check job id and secret
+        env:
+          SECRET: ${{ secrets.APK_BUILD_SECRET }}
+        run: |
+          [[ "$JOB_ID" =~ ^[a-f0-9]{24}$ ]] || { echo "bad job id"; exit 1; }
+          [ -n "$SECRET" ] || { echo "APK_BUILD_SECRET is not set"; exit 1; }
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Fetch job settings
+        env:
+          SECRET: ${{ secrets.APK_BUILD_SECRET }}
+        run: |
+          curl -fsS -H "Authorization: Bearer $SECRET" "$BUILDER_URL/builder/jobs/$JOB_ID" -o job.json
+          jq '.config' job.json > app/src/main/assets/config.json
+          {
+            echo "APP_ID=$(jq -r .appId job.json)"
+            echo "VERSION_CODE=$(jq -r .versionCode job.json)"
+            echo "VERSION_NAME=$(jq -r .versionName job.json)"
+            echo "FIRST_HOST=$(jq -r .firstHost job.json)"
+          } >> "$GITHUB_ENV"
+          jq -r .appName job.json > app_name.txt
+          [[ "$(jq -r .appId job.json)" =~ ^[a-z][a-z0-9_.]+$ ]] || { echo "bad app id"; exit 1; }
+
+      - name: App icon
+        run: |
+          set -e
+          ICON=""
+          if [ -n "$(jq -r '.icon // ""' job.json)" ]; then
+            jq -r .icon job.json | base64 -d > icon_src.png
+            ICON=icon_src.png
+          else
+            # Try the first site's own icon; skip it if it is tiny or not an image.
+            for u in "https://www.google.com/s2/favicons?sz=256&domain=$FIRST_HOST" "https://$FIRST_HOST/apple-touch-icon.png"; do
+              if curl -fsSL --max-time 15 "$u" -o fav.bin 2>/dev/null; then
+                W=$(identify -format '%w' 'fav.bin[0]' 2>/dev/null || echo 0)
+                if [ "${W:-0}" -ge 96 ]; then convert 'fav.bin[0]' fav.png && ICON=fav.png && break; fi
+              fi
+            done
+          fi
+          if [ -n "$ICON" ]; then
+            echo "Using icon $ICON"
+            rm -f app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+            for d in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+              mkdir -p "app/src/main/res/mipmap-${d%%:*}"
+              # square, transparent padding if needed
+              convert "$ICON" -background none -gravity center -resize "${d##*:}x${d##*:}" \
+                -extent "${d##*:}x${d##*:}" "PNG32:app/src/main/res/mipmap-${d%%:*}/ic_launcher.png"
+            done
+          else
+            echo "Using the default icon"
+          fi
+
+      - name: Tell the site we are building
+        env:
+          SECRET: ${{ secrets.APK_BUILD_SECRET }}
+        run: |
+          curl -fsS -X POST -H "Authorization: Bearer $SECRET" -H "content-type: application/json" \
+            -d '{"status":"building"}' "$BUILDER_URL/builder/jobs/$JOB_ID/status" || true
+
+      - name: Signing key
+        env:
+          SECRET: ${{ secrets.APK_BUILD_SECRET }}
+          KS_B64: ${{ secrets.APK_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.APK_KEYSTORE_PASSWORD }}
+        run: |
+          set -e
+          KS="$RUNNER_TEMP/release.jks"
+          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ]; then
+            echo "Using the key from GitHub secrets"
+            echo "$KS_B64" | base64 -d > "$KS"
+            PASS="$KS_PASS"
+          else
+            # One shared key kept by the worker, so new builds install as updates.
+            curl -fsS -H "Authorization: Bearer $SECRET" "$BUILDER_URL/builder/keystore" -o ks.json
+            if [ "$(jq -r '.none // false' ks.json)" = "true" ]; then
+              echo "Creating a new signing key"
+              PASS=$(openssl rand -hex 16)
+              keytool -genkeypair -keystore "$KS" -storetype PKCS12 -alias smt -keyalg RSA -keysize 2048 \
+                -validity 10000 -storepass "$PASS" -keypass "$PASS" -dname "CN=SMT Apps" >/dev/null 2>&1
+              jq -n --arg k "$(base64 -w0 "$KS")" --arg p "$PASS" '{keystore:$k,password:$p}' > ks_new.json
+              curl -fsS -X PUT -H "Authorization: Bearer $SECRET" -H "content-type: application/json" \
+                --data @ks_new.json "$BUILDER_URL/builder/keystore" -o ks.json
+              rm -f ks_new.json "$KS"
+            fi
+            jq -r .keystore ks.json | base64 -d > "$KS"
+            PASS=$(jq -r .password ks.json)
+            rm -f ks.json
+          fi
+          echo "::add-mask::$PASS"
+          echo "KEYSTORE_FILE=$KS" >> "$GITHUB_ENV"
+          echo "KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease \
+            -PappId="$APP_ID" -PappName="$(cat app_name.txt)" \
+            -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
+          ls -la app/build/outputs/apk/release/
+
+      - name: Upload the APK to the site
+        env:
+          SECRET: ${{ secrets.APK_BUILD_SECRET }}
+        run: |
+          curl -fsS -X PUT -H "Authorization: Bearer $SECRET" -H "content-type: application/vnd.android.package-archive" \
+            --data-binary @app/build/outputs/apk/release/app-release.apk "$BUILDER_URL/builder/jobs/$JOB_ID/apk"
+
+      - name: Report failure
+        if: failure()
+        env:
+          SECRET: ${{ secrets.APK_BUILD_SECRET }}
+        run: |
+          curl -fsS -X POST -H "Authorization: Bearer $SECRET" -H "content-type: application/json" \
+            -d '{"status":"error","error":"הבנייה נכשלה. נסה שוב, ואם זה חוזר פנה למנהל האתר."}' \
+            "$BUILDER_URL/builder/jobs/$JOB_ID/status" || true

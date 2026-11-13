@@ -1,0 +1,27 @@
+name = "smt-apk"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# Served at https://smti.uk/apk
+routes = [
+  { pattern = "smti.uk/apk", zone_name = "smti.uk" },
+  { pattern = "smti.uk/apk/*", zone_name = "smti.uk" }
+]
+
+# Same drive-pro database as smt-p. This worker only uses its own tables
+# (apk_jobs, apk_chunks, apk_meta) and never touches the others.
+[[d1_databases]]
+binding = "DB"
+database_name = "drive-pro"
+database_id = "2dee5e98-bf06-4aa3-991d-129ef43b1cc1"
+
+[vars]
+# Repository whose GitHub Actions workflow builds the APK.
+GH_REPO = "smt-ivr/smt-p"
+GH_REF = "main"
+GH_WORKFLOW = "build-apk.yml"
+
+# Secrets (set once with `npx wrangler secret put NAME`):
+#   GH_TOKEN      - GitHub fine-grained token with "Actions: Read and write" on GH_REPO
+#   BUILD_SECRET  - any long random string; the same value goes in the GitHub secret APK_BUILD_SECRET
