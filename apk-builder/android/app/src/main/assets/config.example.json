@@ -1,9 +1,0 @@
-{
-  "sites": [
-    { "title": "דוגמה", "url": "https://example.com/", "restrictPath": false }
-  ],
-  "extraDomains": [],
-  "orientation": "auto",
-  "pinSalt": "",
-  "pinHash": ""
-}
