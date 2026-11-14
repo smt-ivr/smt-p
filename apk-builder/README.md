@@ -14,22 +14,13 @@
    - הורדת קבצים, העלאת קבצים, וידאו במסך מלא, וכפתור חזרה.
    - חותמת קבועה לכל הבניות. בנייה חוזרת עם אותו שם ואותו אתר ראשון מותקנת כעדכון.
 
-## הגדרה חד-פעמית
+## הגדרה חד-פעמית (רק בגיטהאב)
 
 1. ליצור ב-GitHub טוקן מסוג **fine-grained** על המאגר `smt-ivr/smt-p`, עם ההרשאה **Actions: Read and write**.
-2. לבחור מחרוזת סודית ארוכה כלשהי, למשל את הפלט של `openssl rand -hex 32`.
-3. להגדיר את הסודות ב-Worker (מתוך התיקייה `apk-builder/worker`):
-
-   ```bash
-   npx wrangler secret put GH_TOKEN
-   ```
-
-   ```bash
-   npx wrangler secret put BUILD_SECRET
-   ```
-
-4. בגיטהאב: Settings → Secrets and variables → Actions, להוסיף את הסוד `APK_BUILD_SECRET` עם אותה מחרוזת מסעיף 2.
-5. למזג ל-`main`. ה-workflow של Deploy יפרוס גם את האתר הזה, וה-workflow של הבנייה צריך להיות ב-`main` כדי שאפשר יהיה להפעיל אותו.
+2. ב-Settings → Secrets and variables → Actions של המאגר להוסיף שני סודות:
+   - `APK_GH_TOKEN`: הטוקן מסעיף 1.
+   - `APK_BUILD_SECRET`: מחרוזת סודית ארוכה כלשהי.
+3. להריץ שוב את ה-workflow בשם Deploy (Actions → Deploy → Run workflow). הוא מעתיק את שני הסודות ל-Worker בכל פריסה.
 
 אפשר גם לשים מפתח חתימה משלך בסודות `APK_KEYSTORE_B64` ו-`APK_KEYSTORE_PASSWORD`, עם alias בשם `smt`. אם הם לא מוגדרים, הבנייה הראשונה יוצרת מפתח ושומרת אותו ב-D1, וכל הבניות הבאות משתמשות בו.
 

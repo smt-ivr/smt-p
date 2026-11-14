@@ -19,9 +19,31 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Check for APK builder secrets
+        id: apk
+        env:
+          GH_TOKEN: ${{ secrets.APK_GH_TOKEN }}
+          BUILD_SECRET: ${{ secrets.APK_BUILD_SECRET }}
+        run: |
+          if [ -n "$GH_TOKEN" ] && [ -n "$BUILD_SECRET" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "APK_GH_TOKEN / APK_BUILD_SECRET not set - deploying the APK builder without them"; echo "ok=false" >> "$GITHUB_OUTPUT"; fi
+      # The worker's secrets are copied from the GitHub secrets on every deploy,
+      # so they only need to be set in one place (GitHub).
+      - name: Deploy the APK builder (smti.uk/apk) with secrets
+        uses: cloudflare/wrangler-action@v3
+        if: steps.check.outputs.ok == 'true' && steps.apk.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.APK_GH_TOKEN }}
+          BUILD_SECRET: ${{ secrets.APK_BUILD_SECRET }}
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apk-builder/worker
+          secrets: |
+            GH_TOKEN
+            BUILD_SECRET
       - name: Deploy the APK builder (smti.uk/apk)
         uses: cloudflare/wrangler-action@v3
-        if: steps.check.outputs.ok == 'true'
+        if: steps.check.outputs.ok == 'true' && steps.apk.outputs.ok != 'true'
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
